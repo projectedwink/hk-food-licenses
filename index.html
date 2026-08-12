@@ -1,53 +1,190 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-HK">
 <head>
-  <meta charset="utf-8">
-  <title>香港食物業處所每日地圖</title>
-  <style>
-    body { margin: 0; padding: 0; font-family: sans-serif; }
-    #container { display: flex; height: 100vh; }
-    #sidebar { width: 300px; padding: 15px; background: #fff; border-right: 1px solid #ccc; overflow-y: auto; }
-    #map { flex: 1; height: 100%; }
-  </style>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDtzfA9RzfDL0VqSJF7Wo8_rf5Am5Aj9Fk"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>香港食物業處所每日地圖</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* 左側控制面板 */
+        #sidebar { 
+            width: 360px; 
+            padding: 20px; 
+            background: #ffffff; 
+            border-right: 1px solid #e0e0e0; 
+            overflow-y: auto; 
+            z-index: 10;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.05);
+        }
+
+        /* 右側地圖容器 */
+        #map { flex: 1; height: 100%; width: 100%; }
+
+        /* 卡片與元件樣式 */
+        .info-card { 
+            background: #f8f9fa; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 1px solid #e9ecef; 
+            margin-bottom: 20px; 
+            font-size: 14px; 
+            line-height: 1.6;
+        }
+        .info-card h3 { margin-bottom: 10px; color: #1a73e8; font-size: 16px; }
+
+        .filter-group { margin-bottom: 20px; }
+        .filter-group label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 14px; color: #333; }
+        .filter-group select { 
+            width: 100%; 
+            padding: 10px; 
+            border-radius: 6px; 
+            border: 1px solid #cccccc; 
+            font-size: 14px; 
+            background-color: #fff;
+            cursor: pointer;
+        }
+
+        /* 狀態標籤樣式 */
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
+        .bg-new { background-color: #2e7d32; }
+        .bg-existing { background-color: #1976d2; }
+    </style>
 </head>
 <body>
-  <div id="container">
-    <div id="sidebar">
-      <div id="report">載入中...</div>
+
+<div id="sidebar">
+    <!-- 1. 每日統計報告 -->
+    <div id="report-container" class="info-card">
+        <h3>載入報告中...</h3>
     </div>
-    <div id="map"></div>
-  </div>
 
-  <script>
+    <!-- 2. 地區分類篩選器 (SEARCH01_TC) -->
+    <div class="filter-group">
+        <label for="districtSelect">📍 按地區分類 (SEARCH01_TC)</label>
+        <select id="districtSelect" onchange="filterMarkers()">
+            <option value="ALL">全部地區 (All Districts)</option>
+        </select>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+    let map;
+    let allMarkers = [];
+    let geojsonData = null;
+
+    // 地圖初始化
     function initMap() {
-      const map = new google.maps.Map(document.getElementById("map"), {
-        zoom: 11,
-        center: { lat: 22.3193, lng: 114.1694 },
-      });
+        map = new google.maps.Map(document.getElementById("map"), {
+            center: { lat: 22.3193, lng: 114.1694 }, // 香港中心座標
+            zoom: 11,
+            mapTypeControl: true,
+            streetViewControl: false
+        });
 
-      map.data.loadGeoJson("data.json");
+        // 載入日誌報告 report.md
+        fetch('report.md')
+            .then(res => res.text())
+            .then(text => {
+                document.getElementById('report-container').innerHTML = text.replace(/\n/g, '<br>');
+            }).catch(() => {
+                document.getElementById('report-container').innerHTML = "<h3>無最新報告紀錄</h3>";
+            });
 
-      map.data.setStyle((feature) => {
-        const status = feature.getProperty("status");
-        let icon = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-        if (status === "NEW") icon = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
-        return { icon: icon };
-      });
-
-      const infoWindow = new google.maps.InfoWindow();
-      map.data.addListener("click", (event) => {
-        const name = event.feature.getProperty("Name") || "無名稱";
-        infoWindow.setContent(`<b>${name}</b>`);
-        infoWindow.setPosition(event.latLng);
-        infoWindow.open(map);
-      });
-
-      fetch('report.md')
-        .then(res => res.text())
-        .then(text => document.getElementById('report').innerText = text);
+        // 載入牌照數據 data.json
+        fetch('data.json')
+            .then(res => res.json())
+            .then(data => {
+                geojsonData = data;
+                populateDistrictDropdown(data);
+                renderMarkers(data.features);
+            });
     }
-    window.onload = initMap;
-  </script>
+
+    // 動態新增「18區地區選單」選項
+    function populateDistrictDropdown(data) {
+        const districts = new Set();
+        data.features.forEach(f => {
+            if (f.properties.district) {
+                districts.add(f.properties.district);
+            }
+        });
+
+        const select = document.getElementById("districtSelect");
+        Array.from(districts).sort().forEach(dist => {
+            const opt = document.createElement("option");
+            opt.value = dist;
+            opt.textContent = dist;
+            select.appendChild(opt);
+        });
+    }
+
+    // 渲染地圖上的所有 Pin 標籤
+    function renderMarkers(features) {
+        // 清除現有標籤
+        allMarkers.forEach(m => m.setMap(null));
+        allMarkers = [];
+
+        const infowindow = new google.maps.InfoWindow();
+
+        features.forEach(feature => {
+            const props = feature.properties;
+            const coords = feature.geometry.coordinates;
+            const isNew = props.status === 'NEW';
+
+            const marker = new google.maps.Marker({
+                position: { lat: coords[1], lng: coords[0] },
+                map: map,
+                title: props.Name,
+                district: props.district,
+                icon: isNew 
+                    ? "http://maps.google.com/mapfiles/ms/icons/green-dot.png" 
+                    : "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+            });
+
+            // 彈窗內容：顯示詳細的 SimpleData 欄位
+            const contentString = `
+                <div style="font-size:13px; line-height:1.6; max-width:280px; padding:5px;">
+                    <h3 style="margin:0 0 8px 0; color:#1a73e8; font-size:15px;">${props.Name}</h3>
+                    <p><b>類別/許可證：</b> ${props.license_type || props.dataset_name}</p>
+                    <p><b>地區：</b> ${props.district || '未分類'}</p>
+                    <p><b>地址：</b> ${props.address || '無地址資訊'}</p>
+                    <p><b>牌照到期日：</b> <span style="color:#d32f2f; font-weight:bold;">${props.expiry_date || 'N/A'}</span></p>
+                    <p><b>資料更新日：</b> ${props.last_update || 'N/A'}</p>
+                    <div style="margin-top:8px;">
+                        <span class="badge ${isNew ? 'bg-new' : 'bg-existing'}">
+                            ${isNew ? '🟢 今日新增 (NEW)' : '🔵 既有處所'}
+                        </span>
+                    </div>
+                </div>
+            `;
+
+            marker.addListener("click", () => {
+                infowindow.setContent(contentString);
+                infowindow.open(map, marker);
+            });
+
+            allMarkers.push(marker);
+        });
+    }
+
+    // 依選取地區篩選標籤
+    function filterMarkers() {
+        const selectedDistrict = document.getElementById("districtSelect").value;
+        allMarkers.forEach(marker => {
+            if (selectedDistrict === "ALL" || marker.district === selectedDistrict) {
+                marker.setMap(map);
+            } else {
+                marker.setMap(null);
+            }
+        });
+    }
+</script>
+
+<!-- 載入 Google Maps API -->
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=GOOGLE_MAPS_KEY_PLACEHOLDER&callback=initMap"></script>
 </body>
 </html>
