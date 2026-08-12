@@ -16,19 +16,37 @@ URLS = {
 def parse_kml_text(xml_text, category):
     features = []
     try:
-        # 清除所有 XML Namespace (修復 findall 找不到 Placemark 的問題)
+        # 清除 XML Namespace 以便 ElementTree 解析
         clean_xml = re.sub(r'\sxmlns="[^"]+"', '', xml_text)
         clean_xml = re.sub(r'\sxmlns:[a-z]+="[^"]+"', '', clean_xml)
         
         root = ET.fromstring(clean_xml)
-        
         placemarks = root.findall('.//Placemark')
-        print(f"[{category}] Found {len(placemarks)} <Placemark> elements.")
         
         for pm in placemarks:
-            name_elem = pm.find('name')
-            name = name_elem.text.strip() if name_elem is not None and name_elem.text else "未知處所"
-            
+            # 解析 SimpleData 欄位
+            simple_data = {}
+            for sd in pm.findall('.//SimpleData'):
+                key = sd.get('name')
+                if key:
+                    simple_data[key] = sd.text.strip() if sd.text else ""
+
+            # 提取關鍵欄位
+            shop_name = simple_data.get("NSEARCH03_TC", "")      # 商號/店名 (例如: Fusion)
+            license_type = simple_data.get("NAME_TC", "")         # 牌照種類 (例如: 售賣冰凍甜點)
+            dataset_name = simple_data.get("DATASET_TC", "")     # 數據集名稱
+            address = simple_data.get("ADDRESS_TC", "")           # 中文地址
+            district = simple_data.get("SEARCH01_TC", "未知地區") # 18區地區名稱 (例如: 中西區)
+            expiry_date = simple_data.get("NSEARCH04_TC", "")    # 牌照到期日 (NSEARCH04_TC)
+            last_update = simple_data.get("LASTUPDATE", "")       # 資料更新日期
+
+            # 地圖主標題：優先使用店名，無店名則使用牌照種類
+            display_name = shop_name if shop_name else license_type
+            if not display_name:
+                name_elem = pm.find('name')
+                display_name = name_elem.text.strip() if name_elem is not None and name_elem.text else "無名處所"
+
+            # 座標解析
             coord_elem = pm.find('.//coordinates')
             if coord_elem is not None and coord_elem.text:
                 raw_coords = coord_elem.text.strip().split()
@@ -45,7 +63,14 @@ def parse_kml_text(xml_text, category):
                                     "coordinates": [lng, lat]
                                 },
                                 "properties": {
-                                    "Name": name,
+                                    "Name": display_name,
+                                    "shop_name": shop_name,
+                                    "license_type": license_type,
+                                    "dataset_name": dataset_name,
+                                    "address": address,
+                                    "district": district,             # 用於地區分類
+                                    "expiry_date": expiry_date,       # 到期日
+                                    "last_update": last_update,
                                     "category": category
                                 }
                             })
@@ -58,21 +83,14 @@ def parse_kml_text(xml_text, category):
 
 def fetch_all_data():
     all_features = []
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     for cat, url in URLS.items():
-        print(f"\n--- Fetching {cat} ---")
         try:
             res = requests.get(url, headers=headers, timeout=60)
-            print(f"[{cat}] HTTP Status: {res.status_code}, Length: {len(res.content)} bytes")
-            
             content_bytes = res.content
             
-            # 檢查是否為 KMZ / ZIP
             if content_bytes.startswith(b'PK'):
-                print(f"[{cat}] KMZ Zip format detected. Extracting...")
                 with zipfile.ZipFile(io.BytesIO(content_bytes)) as z:
                     for filename in z.namelist():
                         if filename.endswith('.kml'):
@@ -81,9 +99,7 @@ def fetch_all_data():
             
             xml_text = content_bytes.decode('utf-8', errors='ignore')
             feats = parse_kml_text(xml_text, cat)
-            print(f"[{cat}] Successfully parsed {len(feats)} locations.")
             all_features.extend(feats)
-            
         except Exception as e:
             print(f"[{cat}] Fetch error: {e}")
             
@@ -91,9 +107,8 @@ def fetch_all_data():
 
 print("Processing daily data...")
 today_features = fetch_all_data()
-print(f"\nTOTAL FEATURES EXTRACTED: {len(today_features)}")
 
-# 比對與輸出邏輯
+# 比對邏輯 (Diff Engine)
 yesterday_names = set()
 yesterday_file = "previous_data.geojson"
 if os.path.exists(yesterday_file):
@@ -120,12 +135,14 @@ today_geojson = {
     "features": today_features
 }
 
+# 寫入檔案
 with open("data.json", "w", encoding="utf-8") as f:
     json.dump(today_geojson, f, ensure_ascii=False)
 
 with open("previous_data.geojson", "w", encoding="utf-8") as f:
     json.dump(today_geojson, f, ensure_ascii=False)
 
+# 產生報告
 report = f"## 每日牌照更新報告 ({datetime.now().strftime('%Y-%m-%d')})\n\n"
 if yesterday_names:
     report += f"- 🟢 **今日新增處所**: {len(new_items)} 間\n"
@@ -137,4 +154,4 @@ else:
 with open("report.md", "w", encoding="utf-8") as f:
     f.write(report)
 
-print("Processing finished successfully!")
+print(f"Complete! Extracted {len(today_features)} records.")
