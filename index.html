@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>香港食物業處所每日地圖</title>
-    <!-- 引入 Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,9 +12,9 @@
         #map { flex: 1; height: 100%; width: 100%; }
         .info-card { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e9ecef; margin-bottom: 20px; font-size: 14px; line-height: 1.6; }
         .info-card h3 { margin-bottom: 10px; color: #1a73e8; font-size: 16px; }
-        .filter-group { margin-bottom: 20px; }
-        .filter-group label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 14px; }
-        .filter-group select { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+        .filter-group { margin-bottom: 15px; }
+        .filter-group label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333; }
+        .filter-group select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; background-color: #fff; }
         .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
         .bg-new { background-color: #2e7d32; }
         .bg-existing { background-color: #1976d2; }
@@ -27,27 +26,34 @@
     <div id="report-container" class="info-card">
         <h3>載入報告中...</h3>
     </div>
+
+    <!-- 1. 按地區篩選 -->
     <div class="filter-group">
         <label for="districtSelect">📍 按地區分類 (SEARCH01_TC)</label>
         <select id="districtSelect" onchange="filterMarkers()">
             <option value="ALL">全部地區 (All Districts)</option>
         </select>
     </div>
+
+    <!-- 2. 按牌照類別篩選 -->
+    <div class="filter-group">
+        <label for="categorySelect">🍽️ 按牌照類別分類 (NAME_TC)</label>
+        <select id="categorySelect" onchange="filterMarkers()">
+            <option value="ALL">全部類別 (All Categories)</option>
+        </select>
+    </div>
 </div>
 
 <div id="map"></div>
 
-<!-- 引入 Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
     let map;
     let markerLayerGroup = L.layerGroup();
     let allMarkers = [];
 
-    // 初始化 Leaflet 地圖 (以香港為中心)
     map = L.map('map').setView([22.3193, 114.1694], 11);
 
-    // 載入 OpenStreetMap 地圖圖層 (完全免費)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '© OpenStreetMap contributors'
@@ -55,33 +61,43 @@
 
     markerLayerGroup.addTo(map);
 
-    // 載入報告
     fetch('report.md')
         .then(res => res.text())
         .then(text => {
             document.getElementById('report-container').innerHTML = text.replace(/\n/g, '<br>');
         }).catch(() => {});
 
-    // 載入 GeoJSON 數據
     fetch('data.json')
         .then(res => res.json())
         .then(data => {
-            populateDistrictDropdown(data);
+            populateDropdowns(data);
             renderMarkers(data.features);
         });
 
-    function populateDistrictDropdown(data) {
+    // 自動填入「地區」與「類別」兩個選單
+    function populateDropdowns(data) {
         const districts = new Set();
+        const categories = new Set();
+
         data.features.forEach(f => {
             if (f.properties.district) districts.add(f.properties.district);
+            if (f.properties.license_type) categories.add(f.properties.license_type);
         });
 
-        const select = document.getElementById("districtSelect");
+        const districtSelect = document.getElementById("districtSelect");
         Array.from(districts).sort().forEach(dist => {
             const opt = document.createElement("option");
             opt.value = dist;
             opt.textContent = dist;
-            select.appendChild(opt);
+            districtSelect.appendChild(opt);
+        });
+
+        const categorySelect = document.getElementById("categorySelect");
+        Array.from(categories).sort().forEach(cat => {
+            const opt = document.createElement("option");
+            opt.value = cat;
+            opt.textContent = cat;
+            categorySelect.appendChild(opt);
         });
     }
 
@@ -94,7 +110,6 @@
             const coords = feature.geometry.coordinates;
             const isNew = props.status === 'NEW';
 
-            // 設定標籤顏色 (綠色/藍色)
             const marker = L.circleMarker([coords[1], coords[0]], {
                 radius: 6,
                 fillColor: isNew ? "#2e7d32" : "#1976d2",
@@ -105,11 +120,13 @@
             });
 
             marker.district = props.district;
+            marker.licenseType = props.license_type;
 
             const popupContent = `
-                <div style="font-size:13px; line-height:1.6; max-width:260px;">
+                <div style="font-size:13px; line-height:1.6; max-width:270px;">
                     <h3 style="margin:0 0 6px 0; color:#1a73e8;">${props.Name}</h3>
-                    <p><b>類別：</b> ${props.license_type || props.dataset_name}</p>
+                    <p><b>牌照號碼：</b> ${props.license_no || 'N/A'}</p>
+                    <p><b>類別：</b> ${props.license_type}</p>
                     <p><b>地區：</b> ${props.district || '未分類'}</p>
                     <p><b>地址：</b> ${props.address || '無地址資訊'}</p>
                     <p><b>到期日：</b> <b style="color:#d32f2f;">${props.expiry_date || 'N/A'}</b></p>
@@ -128,12 +145,18 @@
         });
     }
 
+    // 雙重選單篩選邏輯 (AND 條件)
     function filterMarkers() {
         const selectedDistrict = document.getElementById("districtSelect").value;
+        const selectedCategory = document.getElementById("categorySelect").value;
+
         markerLayerGroup.clearLayers();
 
         allMarkers.forEach(marker => {
-            if (selectedDistrict === "ALL" || marker.district === selectedDistrict) {
+            const matchDistrict = (selectedDistrict === "ALL" || marker.district === selectedDistrict);
+            const matchCategory = (selectedCategory === "ALL" || marker.licenseType === selectedCategory);
+
+            if (matchDistrict && matchCategory) {
                 markerLayerGroup.addLayer(marker);
             }
         });
