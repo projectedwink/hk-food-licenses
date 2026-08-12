@@ -2,22 +2,50 @@
 <html lang="zh-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>香港食物業處所每日地圖_by EK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>香港食物業處所每日地圖</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; overflow: hidden; }
-        #sidebar { width: 360px; padding: 20px; background: #ffffff; border-right: 1px solid #e0e0e0; overflow-y: auto; z-index: 1000; }
-        #map { flex: 1; height: 100%; width: 100%; }
-        .info-card { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e9ecef; margin-bottom: 20px; font-size: 14px; line-height: 1.6; }
-        .info-card h3 { margin-bottom: 10px; color: #1a73e8; font-size: 16px; }
-        .filter-group { margin-bottom: 15px; }
-        .filter-group label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333; }
-        .filter-group select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; background-color: #fff; }
-        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
+        
+        /* 電腦端預設：左側側欄 */
+        #sidebar { 
+            width: 360px; 
+            padding: 20px; 
+            background: #ffffff; 
+            border-right: 1px solid #e0e0e0; 
+            overflow-y: auto; 
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+
+        #map { flex: 1; height: 100%; width: 100%; z-index: 1; }
+
+        .info-card { background: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e9ecef; margin-bottom: 15px; font-size: 13px; line-height: 1.5; }
+        .info-card h3 { margin-bottom: 8px; color: #1a73e8; font-size: 15px; }
+
+        .filter-group { margin-bottom: 12px; }
+        .filter-group label { display: block; font-weight: bold; margin-bottom: 4px; font-size: 13px; color: #333; }
+        .filter-group select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; background-color: #fff; }
+
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
         .bg-new { background-color: #2e7d32; }
         .bg-existing { background-color: #1976d2; }
+
+        /* 手機介面特別優化 (@media screen) */
+        @media (max-width: 768px) {
+            body { flex-direction: column-reverse; }
+            #sidebar {
+                width: 100%;
+                max-height: 40vh; /* 最多佔用螢幕高度 40% */
+                border-right: none;
+                border-top: 2px solid #e0e0e0;
+                box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
+                padding: 12px 15px;
+            }
+            #map { height: 60vh; }
+        }
     </style>
 </head>
 <body>
@@ -27,7 +55,6 @@
         <h3>載入報告中...</h3>
     </div>
 
-    <!-- 1. 按地區篩選 -->
     <div class="filter-group">
         <label for="districtSelect">📍 按地區分類 (SEARCH01_TC)</label>
         <select id="districtSelect" onchange="filterMarkers()">
@@ -35,7 +62,6 @@
         </select>
     </div>
 
-    <!-- 2. 按牌照類別篩選 -->
     <div class="filter-group">
         <label for="categorySelect">🍽️ 按牌照類別分類 (NAME_TC)</label>
         <select id="categorySelect" onchange="filterMarkers()">
@@ -52,7 +78,10 @@
     let markerLayerGroup = L.layerGroup();
     let allMarkers = [];
 
-    map = L.map('map').setView([22.3193, 114.1694], 11);
+    map = L.map('map', { zoomControl: false }).setView([22.3193, 114.1694], 11);
+
+    // 手機上將放大縮小按鈕放在右上方，避免擋住地圖
+    L.control.zoom({ position: 'topright' }).addTo(map);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -74,7 +103,6 @@
             renderMarkers(data.features);
         });
 
-    // 自動填入「地區」與「類別」兩個選單
     function populateDropdowns(data) {
         const districts = new Set();
         const categories = new Set();
@@ -123,7 +151,7 @@
             marker.licenseType = props.license_type;
 
             const popupContent = `
-                <div style="font-size:13px; line-height:1.6; max-width:270px;">
+                <div style="font-size:13px; line-height:1.6; max-width:240px;">
                     <h3 style="margin:0 0 6px 0; color:#1a73e8;">${props.Name}</h3>
                     <p><b>牌照號碼：</b> ${props.license_no || 'N/A'}</p>
                     <p><b>類別：</b> ${props.license_type}</p>
@@ -145,7 +173,6 @@
         });
     }
 
-    // 雙重選單篩選邏輯 (AND 條件)
     function filterMarkers() {
         const selectedDistrict = document.getElementById("districtSelect").value;
         const selectedCategory = document.getElementById("categorySelect").value;
