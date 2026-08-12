@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>香港食物業處所每日地圖</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+    #container { display: flex; height: 100vh; }
+    #sidebar { width: 300px; padding: 15px; background: #fff; border-right: 1px solid #ccc; overflow-y: auto; }
+    #map { flex: 1; height: 100%; }
+  </style>
+  <script src="https://maps.googleapis.com/maps/api/js?key=GOOGLE_MAPS_KEY_PLACEHOLDER"></script>
+</head>
+<body>
+  <div id="container">
+    <div id="sidebar">
+      <div id="report">載入中...</div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <script>
+    function initMap() {
+      const map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 11,
+        center: { lat: 22.3193, lng: 114.1694 },
+      });
+
+      map.data.loadGeoJson("data.json");
+
+      map.data.setStyle((feature) => {
+        const status = feature.getProperty("status");
+        let icon = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+        if (status === "NEW") icon = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+        return { icon: icon };
+      });
+
+      const infoWindow = new google.maps.InfoWindow();
+      map.data.addListener("click", (event) => {
+        const name = event.feature.getProperty("Name") || "無名稱";
+        infoWindow.setContent(`<b>${name}</b>`);
+        infoWindow.setPosition(event.latLng);
+        infoWindow.open(map);
+      });
+
+      fetch('report.md')
+        .then(res => res.text())
+        .then(text => document.getElementById('report').innerText = text);
+    }
+    window.onload = initMap;
+  </script>
+</body>
+</html>
