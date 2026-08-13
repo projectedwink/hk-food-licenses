@@ -30,11 +30,11 @@ def parse_kml_text(xml_text, category_key):
                     simple_data[key] = sd.text.strip() if sd.text else ""
 
             shop_name = simple_data.get("NSEARCH03_TC", "")      # 店名/商號
-            license_type = simple_data.get("NAME_TC", "")         # 牌照種類 (如: 普通食肆, 工廠食堂, 售賣冰凍甜點)
+            license_type = simple_data.get("NAME_TC", "")         # 牌照種類
             dataset_name = simple_data.get("DATASET_TC", "")     # 數據集名稱
             address = simple_data.get("ADDRESS_TC", "")           # 地址
-            district = simple_data.get("SEARCH01_TC", "未知地區") # 18區地區
-            license_no = simple_data.get("SEARCH02_TC", "")      # 牌照號碼 (唯一鍵!)
+            district = simple_data.get("SEARCH01_TC", "未知地區") # 地區
+            license_no = simple_data.get("SEARCH02_TC", "")      # 牌照號碼 (唯一鍵)
             expiry_date = simple_data.get("NSEARCH04_TC", "")    # 到期日
             last_update = simple_data.get("LASTUPDATE", "")       # 更新日
 
@@ -43,7 +43,6 @@ def parse_kml_text(xml_text, category_key):
                 name_elem = pm.find('name')
                 display_name = name_elem.text.strip() if name_elem is not None and name_elem.text else "無名處所"
 
-            # 使用牌照號碼作為唯一 ID，若無則組合名稱與地址
             uid = license_no if license_no else f"{display_name}_{address}"
             final_license_type = license_type if license_type else dataset_name
 
@@ -104,8 +103,8 @@ def fetch_all_data():
 print("Processing daily data...")
 today_features = fetch_all_data()
 
-# 增量比對 (使用 UID)
-yesterday_uids = set()
+# 讀取昨日歷史數據 (用於比對刪除項)
+yesterday_map = {}
 yesterday_file = "previous_data.geojson"
 has_valid_uid_history = False
 
@@ -116,11 +115,12 @@ if os.path.exists(yesterday_file):
             for feat in prev_data.get("features", []):
                 uid = feat.get("properties", {}).get("uid")
                 if uid:
-                    yesterday_uids.add(uid)
+                    yesterday_map[uid] = feat
                     has_valid_uid_history = True
     except Exception as e:
         print(f"Error reading previous_data: {e}")
 
+yesterday_uids = set(yesterday_map.keys())
 today_uids = set(f["properties"]["uid"] for f in today_features)
 
 if has_valid_uid_history:
@@ -130,22 +130,40 @@ else:
     new_uids = set()
     deleted_uids = set()
 
+# 組合最終輸出列表
+final_export_features = []
+
+# 1. 處理今日存在處所 (NEW / EXISTING)
 for feat in today_features:
     uid = feat["properties"]["uid"]
     feat["properties"]["status"] = "NEW" if (has_valid_uid_history and uid in new_uids) else "EXISTING"
+    final_export_features.append(feat)
 
+# 2. 【核心修復】將註銷/移除的處所從昨日資料抓回，並標記為 REMOVED 寫入 data.json
+for uid in deleted_uids:
+    deleted_feat = yesterday_map[uid]
+    deleted_feat["properties"]["status"] = "REMOVED"
+    final_export_features.append(deleted_feat)
+
+# 輸出給地圖前端使用 (包含今日 + 今日註銷)
 today_geojson = {
     "type": "FeatureCollection",
-    "features": today_features
+    "features": final_export_features
 }
 
 with open("data.json", "w", encoding="utf-8") as f:
     json.dump(today_geojson, f, ensure_ascii=False)
 
-with open("previous_data.geojson", "w", encoding="utf-8") as f:
-    json.dump(today_geojson, f, ensure_ascii=False)
+# 保存基準檔 (僅保存今天依然有效的處所，供明天比對使用)
+existing_geojson = {
+    "type": "FeatureCollection",
+    "features": today_features
+}
 
-# 生成精準報告
+with open("previous_data.geojson", "w", encoding="utf-8") as f:
+    json.dump(existing_geojson, f, ensure_ascii=False)
+
+# 生成報告
 report = f"## 每日牌照更新報告 ({datetime.now().strftime('%Y-%m-%d')})\n\n"
 if has_valid_uid_history:
     report += f"- 🟢 **今日新增處所**: {len(new_uids)} 間\n"
