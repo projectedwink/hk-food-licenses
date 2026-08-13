@@ -1,40 +1,52 @@
-name: Daily KML Processing
+name: Daily HK Food Licenses Update
 
 on:
   schedule:
+    # 每日香港時間 08:00 執行 (UTC 00:00)
     - cron: '0 0 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 支援手動觸發
 
 jobs:
-  run-pipeline:
+  update-and-notify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
-      - name: Install Libraries
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas geopandas fiona
+          pip install requests
 
-      - name: Run Python Script
+      - name: Run Data Engine
         run: python process_data.py
 
-      - name: Inject Google Maps API Key
+      - name: Commit and Push Changes
         run: |
-          sed -i 's/GOOGLE_MAPS_KEY_PLACEHOLDER/${{ secrets.G_MAPS_KEY }}/g' index.html
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data.json previous_data.geojson report.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update license data [$(date +'%Y-%m-%d')]" && git push)
 
-      - name: Commit and Push
-        run: |
-          git config --global user.name "Github Bot"
-          git config --global user.email "bot@github.com"
-          git add data.json previous_data.geojson report.md index.html || true
-          git commit -m "Auto update: $(date)" || exit 0
-          # 拉取遠端最新變更以避免推送衝突
-          git pull origin main --rebase
-          git push
+      # 🎉 增設：發送 Telegram 即時通知
+      - name: Send Telegram Notification
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: markdown
+          message: |
+            🚀 **香港食物牌照每日地圖更新完成！**
+
+            $(cat report.md)
+
+            📍 **立即查看最新地圖：**
+            https://projectedwink.github.io/hk-food-licenses/
