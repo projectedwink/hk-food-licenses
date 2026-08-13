@@ -36,7 +36,16 @@ jobs:
           git add data.json previous_data.geojson report.md
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update license data [$(date +'%Y-%m-%d')]" && git push)
 
-      # 🎉 增設：發送 Telegram 即時通知
+      # 🎉 增設：發送 Telegram 即時通知,讀取 report.md 內容並存入環境變數
+      - name: Read Report Content
+        run: |
+          {
+            echo 'REPORT_TEXT<<EOF'
+            cat report.md
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+      # 2. 發送 Telegram 即時通知
       - name: Send Telegram Notification
         uses: appleboy/telegram-action@master
         with:
@@ -46,7 +55,7 @@ jobs:
           message: |
             🚀 **香港食物牌照每日地圖更新完成！**
 
-            $(cat report.md)
+            ${{ env.REPORT_TEXT }}
 
             📍 **立即查看最新地圖：**
             https://projectedwink.github.io/hk-food-licenses/
