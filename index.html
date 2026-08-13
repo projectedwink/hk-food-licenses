@@ -4,20 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>香港食物業處所每日地圖</title>
+    
+    <!-- 1. Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- 2. Leaflet MarkerCluster 聚合圖層 CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; overflow: hidden; }
         
-        /* 電腦端預設：左側側欄 */
+        /* 側邊欄樣式 */
         #sidebar { 
             width: 360px; 
-            padding: 20px; 
+            padding: 18px; 
             background: #ffffff; 
             border-right: 1px solid #e0e0e0; 
             overflow-y: auto; 
             z-index: 1000;
-            transition: all 0.3s ease;
         }
 
         #map { flex: 1; height: 100%; width: 100%; z-index: 1; }
@@ -25,26 +31,64 @@
         .info-card { background: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e9ecef; margin-bottom: 15px; font-size: 13px; line-height: 1.5; }
         .info-card h3 { margin-bottom: 8px; color: #1a73e8; font-size: 15px; }
 
-        .filter-group { margin-bottom: 12px; }
-        .filter-group label { display: block; font-weight: bold; margin-bottom: 4px; font-size: 13px; color: #333; }
+        .filter-group { margin-bottom: 15px; }
+        .filter-group label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333; }
         .filter-group select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; background-color: #fff; }
+
+        /* 多選類別清單容器 */
+        .category-checkbox-list {
+            max-height: 180px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 8px;
+            background: #fff;
+        }
+        .category-item {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }
+        .category-item input { margin-right: 8px; cursor: pointer; }
+        .color-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+            border: 1px solid rgba(0,0,0,0.2);
+        }
+
+        .btn-link {
+            font-size: 11px;
+            color: #1a73e8;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+            margin-bottom: 6px;
+            margin-right: 10px;
+            text-decoration: underline;
+        }
 
         .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
         .bg-new { background-color: #2e7d32; }
         .bg-existing { background-color: #1976d2; }
 
-        /* 手機介面特別優化 (@media screen) */
+        /* 響應式流動版面 (Mobile) */
         @media (max-width: 768px) {
             body { flex-direction: column-reverse; }
             #sidebar {
                 width: 100%;
-                max-height: 40vh; /* 最多佔用螢幕高度 40% */
+                max-height: 45vh;
                 border-right: none;
                 border-top: 2px solid #e0e0e0;
                 box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
-                padding: 12px 15px;
+                padding: 12px;
             }
-            #map { height: 60vh; }
+            #map { height: 55vh; }
         }
     </style>
 </head>
@@ -55,6 +99,7 @@
         <h3>載入報告中...</h3>
     </div>
 
+    <!-- 地區單選 -->
     <div class="filter-group">
         <label for="districtSelect">📍 按地區分類 (SEARCH01_TC)</label>
         <select id="districtSelect" onchange="filterMarkers()">
@@ -62,25 +107,40 @@
         </select>
     </div>
 
+    <!-- 牌照類別多選 (Multi-select Categories) -->
     <div class="filter-group">
-        <label for="categorySelect">🍽️ 按牌照類別分類 (NAME_TC)</label>
-        <select id="categorySelect" onchange="filterMarkers()">
-            <option value="ALL">全部類別 (All Categories)</option>
-        </select>
+        <label>🍽️ 按牌照類別多選 (Multi-select Category)</label>
+        <div>
+            <button class="btn-link" onclick="toggleSelectAllCategories(true)">全選 (Select All)</button>
+            <button class="btn-link" onclick="toggleSelectAllCategories(false)">取消全選 (Clear)</button>
+        </div>
+        <div id="categoryContainer" class="category-checkbox-list">
+            <!-- 動態生成多選 Checkbox 與色彩標記 -->
+        </div>
     </div>
 </div>
 
 <div id="map"></div>
 
+<!-- JS 庫引入 -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+
 <script>
     let map;
-    let markerLayerGroup = L.layerGroup();
+    let markerClusterGroup;
     let allMarkers = [];
+    let categoryColorMap = {};
+
+    // 高對比鮮明色彩盤（用於區分不同類別）
+    const PALETTE = [
+        '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
+        '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', 
+        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', 
+        '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+    ];
 
     map = L.map('map', { zoomControl: false }).setView([22.3193, 114.1694], 11);
-
-    // 手機上將放大縮小按鈕放在右上方，避免擋住地圖
     L.control.zoom({ position: 'topright' }).addTo(map);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -88,30 +148,51 @@
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    markerLayerGroup.addTo(map);
+    // 初始化 MarkerCluster 聚合圖層
+    markerClusterGroup = L.markerClusterGroup({
+        chunkedLoading: true,        // 大數據流暢加載
+        maxClusterRadius: 50,        // 聚合距離
+        spiderfyOnMaxZoom: true,     // 重疊時自動展開蜘蛛網
+        disableClusteringAtZoom: 17  // 放大到 17 級自動拆解為獨立 Point
+    });
+    map.addLayer(markerClusterGroup);
 
+    // 載入報告
     fetch('report.md')
         .then(res => res.text())
         .then(text => {
             document.getElementById('report-container').innerHTML = text.replace(/\n/g, '<br>');
         }).catch(() => {});
 
+    // 載入 JSON
     fetch('data.json')
         .then(res => res.json())
         .then(data => {
+            setupCategoriesColor(data);
             populateDropdowns(data);
             renderMarkers(data.features);
         });
 
-    function populateDropdowns(data) {
-        const districts = new Set();
+    // 為每一個牌照類別自動綁定專屬顏色
+    function setupCategoriesColor(data) {
         const categories = new Set();
-
         data.features.forEach(f => {
-            if (f.properties.district) districts.add(f.properties.district);
             if (f.properties.license_type) categories.add(f.properties.license_type);
         });
 
+        Array.from(categories).sort().forEach((cat, idx) => {
+            categoryColorMap[cat] = PALETTE[idx % PALETTE.length];
+        });
+    }
+
+    // 建立地區下拉選單與類別多選面板
+    function populateDropdowns(data) {
+        const districts = new Set();
+        data.features.forEach(f => {
+            if (f.properties.district) districts.add(f.properties.district);
+        });
+
+        // 地區選單
         const districtSelect = document.getElementById("districtSelect");
         Array.from(districts).sort().forEach(dist => {
             const opt = document.createElement("option");
@@ -120,41 +201,52 @@
             districtSelect.appendChild(opt);
         });
 
-        const categorySelect = document.getElementById("categorySelect");
-        Array.from(categories).sort().forEach(cat => {
-            const opt = document.createElement("option");
-            opt.value = cat;
-            opt.textContent = cat;
-            categorySelect.appendChild(opt);
+        // 類別多選清單
+        const categoryContainer = document.getElementById("categoryContainer");
+        Object.keys(categoryColorMap).forEach(cat => {
+            const color = categoryColorMap[cat];
+            const div = document.createElement("div");
+            div.className = "category-item";
+            div.innerHTML = `
+                <label style="display:flex; align-items:center; width:100%; cursor:pointer;">
+                    <input type="checkbox" class="cat-checkbox" value="${cat}" checked onchange="filterMarkers()">
+                    <span class="color-dot" style="background-color:${color};"></span>
+                    <span>${cat}</span>
+                </label>
+            `;
+            categoryContainer.appendChild(div);
         });
     }
 
+    // 渲染所有 Marker
     function renderMarkers(features) {
-        markerLayerGroup.clearLayers();
+        markerClusterGroup.clearLayers();
         allMarkers = [];
 
         features.forEach(feature => {
             const props = feature.properties;
             const coords = feature.geometry.coordinates;
             const isNew = props.status === 'NEW';
+            const catColor = categoryColorMap[props.license_type] || '#1976d2';
 
+            // 採用該類別的專屬顏色
             const marker = L.circleMarker([coords[1], coords[0]], {
                 radius: 6,
-                fillColor: isNew ? "#2e7d32" : "#1976d2",
+                fillColor: catColor,
                 color: "#ffffff",
                 weight: 1,
                 opacity: 1,
-                fillOpacity: 0.8
+                fillOpacity: 0.85
             });
 
             marker.district = props.district;
             marker.licenseType = props.license_type;
 
             const popupContent = `
-                <div style="font-size:13px; line-height:1.6; max-width:240px;">
-                    <h3 style="margin:0 0 6px 0; color:#1a73e8;">${props.Name}</h3>
+                <div style="font-size:13px; line-height:1.6; max-width:250px;">
+                    <h3 style="margin:0 0 6px 0; color:${catColor};">${props.Name}</h3>
                     <p><b>牌照號碼：</b> ${props.license_no || 'N/A'}</p>
-                    <p><b>類別：</b> ${props.license_type}</p>
+                    <p><b>類別：</b> <span style="color:${catColor}; font-weight:bold;">${props.license_type}</span></p>
                     <p><b>地區：</b> ${props.district || '未分類'}</p>
                     <p><b>地址：</b> ${props.address || '無地址資訊'}</p>
                     <p><b>到期日：</b> <b style="color:#d32f2f;">${props.expiry_date || 'N/A'}</b></p>
@@ -168,25 +260,38 @@
             `;
 
             marker.bindPopup(popupContent);
-            markerLayerGroup.addLayer(marker);
             allMarkers.push(marker);
         });
+
+        // 預設將全部標籤納入 Cluster 聚合圖層
+        markerClusterGroup.addLayers(allMarkers);
     }
 
+    // 依據「地區」與「勾選的多個類別」進行聯動篩選
     function filterMarkers() {
         const selectedDistrict = document.getElementById("districtSelect").value;
-        const selectedCategory = document.getElementById("categorySelect").value;
+        
+        // 取得目前有被勾選的類別集合
+        const checkedCategories = new Set(
+            Array.from(document.querySelectorAll('.cat-checkbox:checked')).map(cb => cb.value)
+        );
 
-        markerLayerGroup.clearLayers();
+        markerClusterGroup.clearLayers();
 
-        allMarkers.forEach(marker => {
+        const filtered = allMarkers.filter(marker => {
             const matchDistrict = (selectedDistrict === "ALL" || marker.district === selectedDistrict);
-            const matchCategory = (selectedCategory === "ALL" || marker.licenseType === selectedCategory);
-
-            if (matchDistrict && matchCategory) {
-                markerLayerGroup.addLayer(marker);
-            }
+            const matchCategory = checkedCategories.has(marker.licenseType);
+            return matchDistrict && matchCategory;
         });
+
+        // 批次加入聚合圖層
+        markerClusterGroup.addLayers(filtered);
+    }
+
+    // 全選 / 取消全選快捷功能
+    function toggleSelectAllCategories(selectAll) {
+        document.querySelectorAll('.cat-checkbox').forEach(cb => cb.checked = selectAll);
+        filterMarkers();
     }
 </script>
 </body>
