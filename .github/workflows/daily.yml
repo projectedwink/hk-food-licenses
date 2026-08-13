@@ -2,9 +2,9 @@ name: Daily HK Food Licenses Update
 
 on:
   schedule:
-    # 每日香港時間 08:00 執行 (UTC 00:00)
-    - cron: '0 0 * * *'
-  workflow_dispatch: # 支援手動觸發
+    # 每日香港時間 10:30 AM 執行 (即 UTC 02:30 AM)
+    - cron: '30 2 * * *'
+  workflow_dispatch: # 保持支援手動觸發
 
 jobs:
   update-and-notify:
