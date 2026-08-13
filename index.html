@@ -32,7 +32,6 @@
         .filter-group label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #333; }
         .filter-group select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; background-color: #fff; }
 
-        /* 圖層模式切換單選鈕 */
         .mode-toggle {
             display: flex;
             background: #e9ecef;
@@ -96,6 +95,7 @@
 
         .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
         .bg-new { background-color: #2e7d32; }
+        .bg-removed { background-color: #d32f2f; }
         .bg-existing { background-color: #1976d2; }
 
         @media (max-width: 768px) {
@@ -115,16 +115,15 @@
 <body>
 
 <div id="sidebar">
-    <!-- 報告 -->
     <div id="report-container" class="info-card">
         <h3>載入報告中...</h3>
     </div>
 
-    <!-- 🎨 視覺模式切換按鈕 (Layer Switch) -->
+    <!-- 顯示模式切換 -->
     <div class="filter-group">
-        <label>🎨 標籤顯示模式 (Color Layer)</label>
+        <label>🎨 標籤顯示模式 (Display Mode)</label>
         <div class="mode-toggle">
-            <button id="btnModeStatus" class="mode-btn active" onclick="switchMode('STATUS')">🟢 今日新增視角</button>
+            <button id="btnModeStatus" class="mode-btn active" onclick="switchMode('STATUS')">🟢 今日異動視角</button>
             <button id="btnModeCategory" class="mode-btn" onclick="switchMode('CATEGORY')">🍽️ 牌照類別視角</button>
         </div>
     </div>
@@ -156,9 +155,10 @@
 <script>
     let map;
     let markerClusterGroup;
+    let directLayerGroup; // 用於「今日異動視角」的直顯圖層（不聚合）
     let allMarkers = [];
     let categoryColorMap = {};
-    let currentMode = 'STATUS'; // 'STATUS' 或 'CATEGORY'
+    let currentMode = 'STATUS'; 
 
     const PALETTE = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
@@ -175,13 +175,16 @@
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
+    // 1. 初始化聚合圖層 (Category 模式用)
     markerClusterGroup = L.markerClusterGroup({
         chunkedLoading: true,
         maxClusterRadius: 50,
         spiderfyOnMaxZoom: true,
         disableClusteringAtZoom: 17
     });
-    map.addLayer(markerClusterGroup);
+
+    // 2. 初始化直顯圖層 (STATUS 模式用 - 取消聚合)
+    directLayerGroup = L.layerGroup();
 
     fetch('report.md')
         .then(res => res.text())
@@ -245,11 +248,12 @@
             const props = feature.properties;
             const coords = feature.geometry.coordinates;
             const isNew = props.status === 'NEW';
+            const isRemoved = props.status === 'REMOVED';
             const catColor = categoryColorMap[props.license_type] || '#1976d2';
 
             const marker = L.circleMarker([coords[1], coords[0]], {
                 radius: 6,
-                fillColor: "#1976d2", // 預設值，之後由 updateMarkerColors 調整
+                fillColor: "#1976d2",
                 color: "#ffffff",
                 weight: 1,
                 opacity: 1,
@@ -259,7 +263,12 @@
             marker.district = props.district;
             marker.licenseType = props.license_type;
             marker.isNew = isNew;
+            marker.isRemoved = isRemoved;
             marker.catColor = catColor;
+
+            let badgeHtml = '<span class="badge bg-existing">🔵 既有處所</span>';
+            if (isNew) badgeHtml = '<span class="badge bg-new">🟢 今日新增</span>';
+            if (isRemoved) badgeHtml = '<span class="badge bg-removed">🔴 今日註銷/移除</span>';
 
             const popupContent = `
                 <div style="font-size:13px; line-height:1.6; max-width:250px;">
@@ -270,11 +279,7 @@
                     <p><b>地址：</b> ${props.address || '無地址資訊'}</p>
                     <p><b>到期日：</b> <b style="color:#d32f2f;">${props.expiry_date || 'N/A'}</b></p>
                     <p><b>更新日：</b> ${props.last_update || 'N/A'}</p>
-                    <div style="margin-top:6px;">
-                        <span class="badge ${isNew ? 'bg-new' : 'bg-existing'}">
-                            ${isNew ? '🟢 今日新增' : '🔵 既有處所'}
-                        </span>
-                    </div>
+                    <div style="margin-top:6px;">${badgeHtml}</div>
                 </div>
             `;
 
@@ -285,30 +290,13 @@
         filterMarkers();
     }
 
-    // 動態更新 Marker 顏色
-    function updateMarkerColors() {
-        allMarkers.forEach(marker => {
-            if (currentMode === 'STATUS') {
-                // 模式 A：今日新增 (綠色) vs 既有處所 (藍色)
-                marker.setStyle({
-                    fillColor: marker.isNew ? "#2e7d32" : "#1976d2"
-                });
-            } else {
-                // 模式 B：依據牌照類別顯示專屬顏色
-                marker.setStyle({
-                    fillColor: marker.catColor
-                });
-            }
-        });
-    }
-
-    // 切換模式切換
+    // 模式切換
     function switchMode(mode) {
         currentMode = mode;
         document.getElementById('btnModeStatus').classList.toggle('active', mode === 'STATUS');
         document.getElementById('btnModeCategory').classList.toggle('active', mode === 'CATEGORY');
         
-        updateMarkerColors();
+        filterMarkers();
     }
 
     function filterMarkers() {
@@ -317,7 +305,9 @@
             Array.from(document.querySelectorAll('.cat-checkbox:checked')).map(cb => cb.value)
         );
 
+        // 清空兩個圖層
         markerClusterGroup.clearLayers();
+        directLayerGroup.clearLayers();
 
         const filtered = allMarkers.filter(marker => {
             const matchDistrict = (selectedDistrict === "ALL" || marker.district === selectedDistrict);
@@ -325,8 +315,42 @@
             return matchDistrict && matchCategory;
         });
 
-        updateMarkerColors();
-        markerClusterGroup.addLayers(filtered);
+        if (currentMode === 'STATUS') {
+            // 【今日異動視角】：取消聚合，使用直顯圖層
+            if (map.hasLayer(markerClusterGroup)) map.removeLayer(markerClusterGroup);
+            if (!map.hasLayer(directLayerGroup)) map.addLayer(directLayerGroup);
+
+            // 調整點位大小與顏色 (放大今日新增 🟢 與註銷 🔴，弱化既有點 🔵)
+            filtered.forEach(marker => {
+                if (marker.isNew) {
+                    marker.setRadius(12); // 放大雙倍 (6px -> 12px)
+                    marker.setStyle({ fillColor: '#2e7d32', fillOpacity: 0.9, weight: 2, color: '#ffffff' });
+                    directLayerGroup.addLayer(marker);
+                    marker.bringToFront(); // 確保亮眼點位顯示在最上層
+                } else if (marker.isRemoved) {
+                    marker.setRadius(12); // 放大雙倍 (6px -> 12px)
+                    marker.setStyle({ fillColor: '#d32f2f', fillOpacity: 0.9, weight: 2, color: '#ffffff' });
+                    directLayerGroup.addLayer(marker);
+                    marker.bringToFront();
+                } else {
+                    marker.setRadius(4); // 既有處所縮小，避免干擾
+                    marker.setStyle({ fillColor: '#1976d2', fillOpacity: 0.3, weight: 0.5, color: '#ffffff' });
+                    directLayerGroup.addLayer(marker);
+                }
+            });
+
+        } else {
+            // 【牌照類別視角】：恢復聚合圖層與標準點位大小
+            if (map.hasLayer(directLayerGroup)) map.removeLayer(directLayerGroup);
+            if (!map.hasLayer(markerClusterGroup)) map.addLayer(markerClusterGroup);
+
+            filtered.forEach(marker => {
+                marker.setRadius(6); // 恢復標準尺寸
+                marker.setStyle({ fillColor: marker.catColor, fillOpacity: 0.85, weight: 1, color: '#ffffff' });
+            });
+
+            markerClusterGroup.addLayers(filtered);
+        }
     }
 
     function toggleSelectAllCategories(selectAll) {
